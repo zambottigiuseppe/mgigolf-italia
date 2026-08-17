@@ -1,0 +1,595 @@
+"use client";
+
+import { useState } from "react";
+import { doc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/lib/firebase";
+import { batteryCareSections } from "@/content/battery-care";
+import { puntiAssistenza } from "@/content/punti-assistenza";
+import {
+  generaCodiceCertificatoUnivoco,
+  datiCertificato,
+  type DatiCertificato,
+} from "@/lib/certificato-garanzia";
+
+const MODELLI = [
+  "Ai NavigATor GPS+ Black 380Wh Li BAT",
+  "Ai Nav GPS+ Matte Navy Black (Ltd Edt)",
+  "Ai Navigator Halo Black (NEW)",
+  "E-Boost Matte Black (NEW)",
+  "E-Boost Matte Navy (NEW)",
+  "E-Boost Matte White (NEW)",
+  "Zip X1 Matte Black/Gloss 250Wh Li BAT",
+  "Zip X1 Matte Black/Gloss BUP 299Wh Li BAT",
+  "Zip X3 Matte Black/Gloss 250Wh Li BAT",
+  "Zip X3 Matte Black/Gloss BUP 299Wh Li BAT",
+  "Zip X5 Matte Black/Gloss 250Wh Li BAT",
+  "Zip X5 Matte Black/Gloss BUP 299Wh Li BAT",
+  "Zip Nav AT Matte Navy Gloss Blk (Ltd Edt)",
+  "Zip Nav ATB Matte Black/Gloss 299Wh Li BAT",
+  "Zip Nav Matte Black/Gloss 299Wh Li BAT",
+  "Altro"
+] as const;
+
+// Durata della garanzia in anni, differenziata per tipo di acquirente.
+const ANNI_GARANZIA_PRIVATO = 2;
+const ANNI_GARANZIA_AZIENDA = 1;
+// Dimensione massima della prova d'acquisto caricabile.
+const MAX_FILE_MB = 10;
+// Versione del testo di informativa/istruzioni accettato dall'utente.
+// Da aggiornare ogni volta che si modifica il testo privacy o le istruzioni batteria.
+const VERSIONE_INFORMATIVA = "2026-08";
+
+export default function RegistrazionePage() {
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [openRegioni, setOpenRegioni] = useState<Record<string, boolean>>({});
+  // Serve a mostrare i campi azienda solo quando servono.
+  const [tipoAcquirente, setTipoAcquirente] = useState("");
+  // Anni effettivamente assegnati, mostrati nella schermata di conferma.
+  const [anniAssegnati, setAnniAssegnati] = useState(ANNI_GARANZIA_PRIVATO);
+  // Dati del certificato, pronti dalla registrazione stessa: se presenti, la
+  // schermata di successo mostra "Stampa certificato" e riusa sempre questi
+  // (nessuna nuova generazione di codice al click, nessuna scrittura extra).
+  const [datiCertificatoPronto, setDatiCertificatoPronto] = useState<DatiCertificato | null>(null);
+  const [generandoCertificato, setGenerandoCertificato] = useState(false);
+  const [erroreCertificato, setErroreCertificato] = useState("");
+
+  // Data massima selezionabile nel campo "Data di acquisto": oggi.
+  const oggiISO = new Date().toISOString().split("T")[0];
+
+  function toggleSection(id: string) {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function toggleRegione(id: string) {
+    setOpenRegioni((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  async function handleStampaCertificato() {
+    if (!datiCertificatoPronto) return;
+    setGenerandoCertificato(true);
+    setErroreCertificato("");
+    try {
+      const { generaCertificatoPdf } = await import("@/lib/certificato-pdf");
+      await generaCertificatoPdf(datiCertificatoPronto);
+    } catch (e) {
+      setErroreCertificato(
+        (e as { message?: string })?.message || "Errore nella generazione del certificato"
+      );
+    } finally {
+      setGenerandoCertificato(false);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+
+    const matricola = ((formData.get("matricola") as string) || "")
+      .trim()
+      .toUpperCase();
+    const batteriaMatricola = ((formData.get("batteriaMatricola") as string) || "")
+      .trim()
+      .toUpperCase();
+    const dataAcquistoStr = (formData.get("dataAcquisto") as string) || "";
+    const tipo = (formData.get("tipoAcquirente") as string) || "";
+
+    // La matricola viene usata come ID del documento Firestore:
+    // deve essere non vuota, senza "/" e di lunghezza ragionevole.
+    if (!matricola || matricola.includes("/") || matricola.length > 100) {
+      setError("Numero di serie non valido. Controlla la matricola e riprova.");
+      setLoading(false);
+      return;
+    }
+
+    if (!batteriaMatricola) {
+      setError("Inserisci il numero di serie della batteria.");
+      setLoading(false);
+      return;
+    }
+
+    if (tipo !== "privato" && tipo !== "azienda") {
+      setError("Indica se l'acquisto è stato effettuato da privato o da azienda.");
+      setLoading(false);
+      return;
+    }
+
+    // Validazione data di acquisto.
+    // "T00:00:00" forza l'interpretazione in ora locale ed evita lo scarto di un giorno.
+    const inizio = new Date(dataAcquistoStr + "T00:00:00");
+    if (isNaN(inizio.getTime())) {
+      setError("Inserisci una data di acquisto valida.");
+      setLoading(false);
+      return;
+    }
+
+    const fineOggi = new Date();
+    fineOggi.setHours(23, 59, 59, 999);
+    if (inizio > fineOggi) {
+      setError("La data di acquisto non può essere futura.");
+      setLoading(false);
+      return;
+    }
+
+    // Durata in base al tipo di acquirente.
+    const anniGaranzia =
+      tipo === "azienda" ? ANNI_GARANZIA_AZIENDA : ANNI_GARANZIA_PRIVATO;
+
+    // La garanzia decorre dalla DATA DI ACQUISTO, non dalla data di registrazione.
+    const scadenza = new Date(inizio);
+    scadenza.setFullYear(inizio.getFullYear() + anniGaranzia);
+    const stato = scadenza > new Date() ? "attiva" : "scaduta";
+
+    try {
+      const docRef = doc(db, "registrazioni_garanzia", matricola);
+
+      // Upload della prova d'acquisto (facoltativa).
+      let provaAcquistoUrl: string | null = null;
+      const file = formData.get("provaAcquisto") as File;
+
+      if (file && file.size > 0) {
+        if (file.size > MAX_FILE_MB * 1024 * 1024) {
+          setError(
+            `Il file supera ${MAX_FILE_MB} MB. Comprimilo o scatta una foto a risoluzione più bassa.`
+          );
+          return;
+        }
+        const storageRef = ref(
+          storage,
+          `garanzie/${matricola}/${Date.now()}_${file.name}`
+        );
+        await uploadBytes(storageRef, file);
+        provaAcquistoUrl = await getDownloadURL(storageRef);
+      }
+
+      const numeroOrdine = (formData.get("numeroOrdine") as string) || null;
+
+      // Codice certificato generato QUI, prima del setDoc, così finisce nella
+      // stessa scrittura di creazione: registrazioni_garanzia non è mai
+      // aggiornabile dopo la creazione (regola "allow update: if false", anti
+      // doppioni), quindi il codice non può essere aggiunto in un secondo
+      // momento. Se la generazione fallisce (rete, ecc.) non blocchiamo la
+      // registrazione: il certificato è un'aggiunta, non un requisito — la
+      // garanzia si salva comunque, semplicemente senza pulsante di stampa.
+      let codiceCertificato: string | null = null;
+      try {
+        codiceCertificato = await generaCodiceCertificatoUnivoco();
+      } catch (e) {
+        console.error("Generazione codice certificato fallita:", e);
+      }
+
+      // setDoc con la matricola come ID: due registrazioni della stessa matricola
+      // non possono coesistere. La regola Firestore "allow update: if false"
+      // fa rifiutare dal server il secondo tentativo.
+      await setDoc(docRef, {
+        nome: formData.get("nome"),
+        cognome: formData.get("cognome"),
+        email: formData.get("email"),
+        telefono: formData.get("telefono"),
+        tipoAcquirente: tipo,
+        ragioneSociale: tipo === "azienda" ? formData.get("ragioneSociale") || null : null,
+        partitaIva: tipo === "azienda" ? formData.get("partitaIva") || null : null,
+        indirizzo: formData.get("indirizzo") || null,
+        citta: formData.get("citta") || null,
+        cap: formData.get("cap") || null,
+        provincia: formData.get("provincia") || null,
+        modello: formData.get("modello"),
+        matricola,
+        batteriaMatricola,
+        dataAcquisto: dataAcquistoStr,
+        numeroOrdine,
+        provaAcquistoUrl,
+        dataInizioGaranzia: Timestamp.fromDate(inizio),
+        dataScadenzaGaranzia: Timestamp.fromDate(scadenza),
+        anniGaranzia,
+        stato,
+        fonte: "sito",
+        privacyAccettata: formData.get("privacy") === "on",
+        batteriaIstruzioniAccettate: formData.get("batteria") === "on",
+        versioneInformativa: VERSIONE_INFORMATIVA,
+        createdAt: serverTimestamp(),
+        ...(codiceCertificato
+          ? { certificatoCodice: codiceCertificato, certificatoGeneratoAt: serverTimestamp() }
+          : {}),
+      });
+
+      if (codiceCertificato) {
+        setDatiCertificatoPronto(
+          datiCertificato(
+            {
+              nome: formData.get("nome") as string,
+              cognome: formData.get("cognome") as string,
+              modello: formData.get("modello") as string,
+              matricola,
+              batteriaMatricola,
+              dataAcquisto: dataAcquistoStr,
+              dataInizioGaranzia: Timestamp.fromDate(inizio),
+              anniGaranzia,
+              numeroOrdine,
+            },
+            codiceCertificato
+          )
+        );
+      }
+
+      setAnniAssegnati(anniGaranzia);
+      setSuccess(true);
+      form.reset();
+    } catch (err) {
+      console.error(err);
+      const codice = (err as { code?: string })?.code;
+
+      if (codice === "permission-denied") {
+        setError(
+          "Questa matricola risulta già registrata, oppure alcuni dati non sono validi. Se hai acquistato il carrello usato, scrivici a support@verticalgolf.it."
+        );
+      } else if (codice === "storage/unauthorized") {
+        setError(
+          "Non è stato possibile caricare la prova d'acquisto. Riprova con un file più piccolo (immagine o PDF) oppure inviala via email a support@verticalgolf.it."
+        );
+      } else {
+        setError(
+          "Non è stato possibile completare la registrazione. Riprova tra qualche minuto o scrivici a support@verticalgolf.it."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="min-h-screen bg-[#f8f9f8] flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-sm border border-gray-100 p-10 text-center">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-8 h-8 text-[#1A4731]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-semibold text-gray-900 mb-3">Garanzia registrata</h1>
+          <p className="text-gray-600 mb-2">
+            La tua garanzia ufficiale MGI Italia è attiva per{" "}
+            <strong>{anniAssegnati === 1 ? "1 anno" : `${anniAssegnati} anni`}</strong>{" "}
+            dalla data di acquisto.
+          </p>
+          <p className="text-sm text-gray-500 mb-6">
+            Conserva il numero di serie del tuo carrello: è il riferimento della tua garanzia.
+          </p>
+
+          {datiCertificatoPronto && (
+            <>
+              <button
+                type="button"
+                onClick={handleStampaCertificato}
+                disabled={generandoCertificato}
+                className="w-full bg-[#1A4731] hover:bg-[#163c29] text-white font-medium py-3 px-4 rounded-xl transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {generandoCertificato ? "Generazione in corso..." : "Stampa certificato"}
+              </button>
+              {erroreCertificato && (
+                <p className="text-sm text-red-600 mt-3">{erroreCertificato}</p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f8f9f8]">
+      {/* Header */}
+      <header className="bg-[#1A4731] text-white">
+        <div className="max-w-3xl mx-auto px-4 py-6 flex items-center justify-between">
+          <div>
+            <div className="text-xs tracking-widest text-[#C9A84C] font-medium mb-1">MGI GOLF ITALIA</div>
+            <h1 className="text-xl font-semibold">Registrazione Garanzia</h1>
+          </div>
+          <div className="text-right text-sm text-white/70">
+            Partner ufficiale<br />per l’Italia
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-4 py-10">
+        {/* Intro */}
+        <div className="mb-10">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+            Attiva la tua garanzia ufficiale
+          </h2>
+          <p className="text-gray-600 leading-relaxed">
+            Compila il modulo qui sotto per registrare il tuo carrello MGI.
+            La garanzia decorre dalla data di acquisto ed è gestita direttamente in Italia.
+          </p>
+          <p className="text-sm text-gray-500 leading-relaxed mt-3">
+            Per gli acquisti effettuati da privati consumatori la garanzia è di {ANNI_GARANZIA_PRIVATO} anni
+            e si aggiunge alla garanzia legale di conformità dovuta dal venditore, senza limitarla
+            né sostituirla. Per gli acquisti effettuati da imprese o titolari di partita IVA si
+            applicano i termini previsti dal Codice Civile per le vendite tra professionisti,
+            pari a {ANNI_GARANZIA_AZIENDA} anno dalla consegna.
+          </p>
+        </div>
+
+        {/* ========== PUNTI ASSISTENZA ========== */}
+        <section className="mb-12">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-[#1A4731] px-6 py-4">
+              <h3 className="text-white font-semibold text-lg">
+                Punti Assistenza Autorizzati
+              </h3>
+              <p className="text-white/80 text-sm mt-1">
+                Clicca sulla regione per vedere i dettagli
+              </p>
+            </div>
+
+            <div className="divide-y divide-gray-100">
+              {puntiAssistenza.map((regione) => (
+                <div key={regione.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggleRegione(regione.id)}
+                    className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition"
+                  >
+                    <span className="font-medium text-gray-900">{regione.regione}</span>
+                    <svg
+                      className={`w-5 h-5 text-gray-500 transition-transform ${openRegioni[regione.id] ? "rotate-180" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {openRegioni[regione.id] && (
+                    <div className="px-6 pb-5 space-y-4">
+                      {regione.punti.map((punto, i) => (
+                        <div key={i} className="bg-gray-50 rounded-xl p-4">
+                          <div className="font-semibold text-gray-900">{punto.nome}</div>
+                          <div className="text-sm text-gray-600 mt-1">{punto.citta}</div>
+                          {punto.indirizzo && (
+                            <div className="text-sm text-gray-600 mt-1">{punto.indirizzo}</div>
+                          )}
+                          {punto.telefono && (
+                            <div className="text-sm text-gray-600 mt-1">
+                              Tel: <a href={`tel:${punto.telefono}`} className="text-[#1A4731] hover:underline">{punto.telefono}</a>
+                            </div>
+                          )}
+                          {punto.email && (
+                            <div className="text-sm text-gray-600 mt-1">
+                              Email: <a href={`mailto:${punto.email}`} className="text-[#1A4731] hover:underline">{punto.email}</a>
+                            </div>
+                          )}
+                          {punto.sito && (
+                            <div className="text-sm mt-2">
+                              <a href={punto.sito} target="_blank" rel="noopener noreferrer" className="text-[#1A4731] hover:underline font-medium">
+                                Visita il sito →
+                              </a>
+                            </div>
+                          )}
+                          {punto.note && (
+                            <div className="text-xs text-gray-500 mt-2">{punto.note}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ========== BATTERY CARE (modulare) ========== */}
+        <section className="mb-12">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-[#1A4731] px-6 py-4">
+              <h3 className="text-white font-semibold text-lg">
+                Istruzioni importanti – Batterie al litio MGI
+              </h3>
+              <p className="text-white/80 text-sm mt-1">
+                Leggi attentamente prima di registrare la garanzia
+              </p>
+            </div>
+
+            <div className="divide-y divide-gray-100">
+              {batteryCareSections.map((section) => (
+                <div key={section.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(section.id)}
+                    className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition"
+                  >
+                    <span className="font-medium text-gray-900">{section.title}</span>
+                    <svg
+                      className={`w-5 h-5 text-gray-500 transition-transform ${openSections[section.id] ? "rotate-180" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {openSections[section.id] && (
+                    <div className="px-6 pb-5 space-y-3">
+                      {section.paragraphs.map((p, i) => (
+                        <p key={i} className="text-sm text-gray-600 leading-relaxed">
+                          {p}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Form */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Nome *</label>
+                <input name="nome" required autoComplete="given-name" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Cognome *</label>
+                <input name="cognome" required autoComplete="family-name" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email *</label>
+              <input name="email" type="email" required autoComplete="email" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Telefono *</label>
+              <input name="telefono" type="tel" inputMode="tel" required autoComplete="tel" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+            </div>
+
+            {/* Tipo di acquirente: determina la durata della garanzia */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Acquisto effettuato come *</label>
+              <select
+                name="tipoAcquirente"
+                required
+                value={tipoAcquirente}
+                onChange={(e) => setTipoAcquirente(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition bg-white"
+              >
+                <option value="">Seleziona</option>
+                <option value="privato">Privato / consumatore</option>
+                <option value="azienda">Azienda o titolare di partita IVA</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1.5">
+                Determina la durata della garanzia: {ANNI_GARANZIA_PRIVATO} anni per i privati
+                consumatori, {ANNI_GARANZIA_AZIENDA} anno per gli acquisti con partita IVA,
+                secondo quanto previsto dalla normativa italiana.
+              </p>
+            </div>
+
+            {/* Campi mostrati solo per gli acquisti aziendali */}
+            {tipoAcquirente === "azienda" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Ragione sociale *</label>
+                  <input name="ragioneSociale" required autoComplete="organization" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Partita IVA *</label>
+                  <input name="partitaIva" required inputMode="numeric" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Modello *</label>
+              <select name="modello" required className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition bg-white">
+                <option value="">Seleziona il modello</option>
+                {MODELLI.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Numero di serie / Matricola *</label>
+              <input name="matricola" required placeholder="Es. AZXNV..." className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 uppercase focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <p className="text-xs text-gray-500 mt-1.5">
+                La trovi sull&apos;etichetta applicata al telaio del carrello.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Numero di serie / Matricola batteria *</label>
+              <input name="batteriaMatricola" required placeholder="Es. BAT..." className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 uppercase focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <p className="text-xs text-gray-500 mt-1.5">
+                La trovi sull&apos;etichetta della batteria.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Data di acquisto *</label>
+              <input name="dataAcquisto" type="date" required max={oggiISO} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Numero ordine (opzionale)</label>
+              <input name="numeroOrdine" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Prova d&apos;acquisto (foto o PDF)</label>
+              <input name="provaAcquisto" type="file" accept="image/*,.pdf" className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200" />
+              <p className="text-xs text-gray-500 mt-1.5">
+                Massimo {MAX_FILE_MB} MB. Scontrino o fattura: ci serve per verificare la data di acquisto.
+              </p>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              <label className="flex items-start gap-3 text-sm text-gray-700">
+                <input type="checkbox" name="privacy" required className="mt-1 rounded border-gray-300 text-[#1A4731] focus:ring-[#1A4731]" />
+                <span>Accetto la privacy policy e il trattamento dei dati per la gestione della garanzia. *</span>
+              </label>
+
+              <label className="flex items-start gap-3 text-sm text-gray-700">
+                <input type="checkbox" name="batteria" required className="mt-1 rounded border-gray-300 text-[#1A4731] focus:ring-[#1A4731]" />
+                <span>
+                  <strong>Dichiaro di aver letto e compreso integralmente le istruzioni relative alla batteria al litio.</strong> *
+                </span>
+              </label>
+            </div>
+
+            {error && (
+              <div className="text-red-600 text-sm bg-red-50 border border-red-100 p-4 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#1A4731] hover:bg-[#163c29] text-white font-medium py-3.5 px-4 rounded-xl transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? "Registrazione in corso..." : "Registra garanzia"}
+            </button>
+          </form>
+        </div>
+
+        <p className="text-center text-sm text-gray-500 mt-8">
+          Assistenza e ricambi originali gestiti direttamente in Italia
+        </p>
+      </main>
+    </div>
+  );
+}
