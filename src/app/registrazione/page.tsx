@@ -180,7 +180,7 @@ export default function RegistrazionePage() {
       // garanzia si salva comunque, semplicemente senza pulsante di stampa.
       let codiceCertificato: string | null = null;
       try {
-        codiceCertificato = await generaCodiceCertificatoUnivoco();
+        codiceCertificato = await generaCodiceCertificatoUnivoco(matricola);
       } catch (e) {
         console.error("Generazione codice certificato fallita:", e);
       }

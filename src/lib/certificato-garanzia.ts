@@ -7,30 +7,30 @@
  * (un cliente = un carrello + una batteria, niente righe multiple).
  */
 
-import { collection, getDocs, query, where, type Timestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import type { Timestamp } from "firebase/firestore";
 import { tipoDaMatricola } from "@/lib/batterie";
 
 // Alfabeto senza caratteri ambigui (niente 0/O, 1/I/L) — stesso schema del gestionale.
 const ALFABETO_CODICE = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
-function randomCode(len: number): string {
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => ALFABETO_CODICE[b % ALFABETO_CODICE.length]).join("");
-}
-
-/** Genera un codice VG-CERT-<anno>-<6 caratteri>, verificato univoco su registrazioni_garanzia. */
-export async function generaCodiceCertificatoUnivoco(): Promise<string> {
-  const year = new Date().getFullYear();
-  for (let tentativo = 0; tentativo < 5; tentativo++) {
-    const candidato = `VG-CERT-${year}-${randomCode(6)}`;
-    const snap = await getDocs(
-      query(collection(db, "registrazioni_garanzia"), where("certificatoCodice", "==", candidato))
-    );
-    if (snap.empty) return candidato;
+/**
+ * Genera un codice VG-CERT-<anno>-<6 caratteri>, derivato deterministicamente
+ * dalla matricola (hash SHA-256, primi 6 byte mappati sull'alfabeto sopra).
+ * Nessuna lettura Firestore: l'unicità è ereditata da quella della matricola
+ * stessa, già garantita da Firestore (è l'ID del documento, e la regola
+ * "allow update: if false" impedisce di registrarne due con lo stesso ID) —
+ * stessa matricola = stesso codice, matricole diverse = codici diversi con
+ * probabilità di collisione trascurabile (31^6 combinazioni possibili).
+ */
+export async function generaCodiceCertificatoUnivoco(matricola: string): Promise<string> {
+  const anno = new Date().getFullYear();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(matricola));
+  const hashBytes = new Uint8Array(hashBuffer);
+  let suffisso = "";
+  for (let i = 0; i < 6; i++) {
+    suffisso += ALFABETO_CODICE[hashBytes[i] % ALFABETO_CODICE.length];
   }
-  throw new Error("Impossibile generare un codice certificato univoco, riprova.");
+  return `VG-CERT-${anno}-${suffisso}`;
 }
 
 export type DatiCertificato = {
