@@ -1,7 +1,7 @@
 /**
  * Certificato di Garanzia — dati e codice univoco.
- * Il layout vive in public/templates/certificato-garanzia/template.html:
- * qui c'è solo la logica che prepara i dati da iniettare nei placeholder.
+ * Il layout vive in lib/certificato-pdf.ts (rendering vettoriale con pdf-lib):
+ * qui c'è solo la logica che prepara i dati per quella funzione.
  * Adattato da gestionale-next/lib/certificato-garanzia.ts: lì la fonte era
  * una vendita + riga carrello, qui è un documento registrazioni_garanzia
  * (un cliente = un carrello + una batteria, niente righe multiple).
