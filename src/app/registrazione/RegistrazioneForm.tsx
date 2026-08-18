@@ -7,6 +7,7 @@ import { db, storage } from "@/lib/firebase";
 import { batteryCareSections } from "@/content/battery-care";
 import { puntiAssistenza } from "@/content/punti-assistenza";
 import type { CarrelloCatalogo } from "@/lib/carrelli-catalogo";
+import type { PrecompilazioneDati } from "@/lib/precompilazione";
 import {
   generaCodiceCertificatoUnivoco,
   datiCertificato,
@@ -25,14 +26,21 @@ const MAX_FILE_MB = 10;
 // Da aggiornare ogni volta che si modifica il testo privacy o le istruzioni batteria.
 const VERSIONE_INFORMATIVA = "2026-08";
 
-export default function RegistrazioneForm({ carrelli }: { carrelli: CarrelloCatalogo[] }) {
+export default function RegistrazioneForm({
+  carrelli,
+  precompilazione,
+}: {
+  carrelli: CarrelloCatalogo[];
+  precompilazione?: PrecompilazioneDati | null;
+}) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [openRegioni, setOpenRegioni] = useState<Record<string, boolean>>({});
-  // Serve a mostrare i campi azienda solo quando servono.
-  const [tipoAcquirente, setTipoAcquirente] = useState("");
+  // Serve a mostrare i campi azienda solo quando servono. Precompilato dal QR
+  // garanzia se disponibile, ma resta liberamente modificabile dal cliente.
+  const [tipoAcquirente, setTipoAcquirente] = useState(precompilazione?.tipoAcquirente || "");
   // Anni effettivamente assegnati, mostrati nella schermata di conferma.
   const [anniAssegnati, setAnniAssegnati] = useState(ANNI_GARANZIA_PRIVATO);
   // Dati del certificato, pronti dalla registrazione stessa: se presenti, la
@@ -464,22 +472,22 @@ export default function RegistrazioneForm({ carrelli }: { carrelli: CarrelloCata
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Nome *</label>
-                <input name="nome" required autoComplete="given-name" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+                <input name="nome" required autoComplete="given-name" defaultValue={precompilazione?.nome || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Cognome *</label>
-                <input name="cognome" required autoComplete="family-name" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+                <input name="cognome" required autoComplete="family-name" defaultValue={precompilazione?.cognome || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Email *</label>
-              <input name="email" type="email" required autoComplete="email" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <input name="email" type="email" required autoComplete="email" defaultValue={precompilazione?.email || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Telefono *</label>
-              <input name="telefono" type="tel" inputMode="tel" required autoComplete="tel" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <input name="telefono" type="tel" inputMode="tel" required autoComplete="tel" defaultValue={precompilazione?.telefono || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
             </div>
 
             {/* Tipo di acquirente: determina la durata della garanzia */}
@@ -508,18 +516,18 @@ export default function RegistrazioneForm({ carrelli }: { carrelli: CarrelloCata
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Ragione sociale *</label>
-                  <input name="ragioneSociale" required autoComplete="organization" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+                  <input name="ragioneSociale" required autoComplete="organization" defaultValue={precompilazione?.ragioneSociale || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Partita IVA *</label>
-                  <input name="partitaIva" required inputMode="numeric" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+                  <input name="partitaIva" required inputMode="numeric" defaultValue={precompilazione?.partitaIva || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
                 </div>
               </div>
             )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Modello *</label>
-              <select name="codiceModello" required className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition bg-white">
+              <select name="codiceModello" required defaultValue={precompilazione?.codiceModello || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition bg-white">
                 <option value="">Seleziona il modello</option>
                 {carrelli.map((c) => (
                   <option key={c.codice} value={c.codice}>{c.descrizione}</option>
@@ -530,7 +538,7 @@ export default function RegistrazioneForm({ carrelli }: { carrelli: CarrelloCata
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Numero di serie / Matricola *</label>
-              <input name="matricola" required placeholder="Es. AZXNV..." className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 uppercase focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <input name="matricola" required placeholder="Es. AZXNV..." defaultValue={precompilazione?.matricola || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 uppercase focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
               <p className="text-xs text-gray-500 mt-1.5">
                 La trovi sull&apos;etichetta applicata al telaio del carrello.
               </p>
@@ -538,7 +546,7 @@ export default function RegistrazioneForm({ carrelli }: { carrelli: CarrelloCata
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Numero di serie / Matricola batteria *</label>
-              <input name="batteriaMatricola" required placeholder="Es. BAT..." className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 uppercase focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <input name="batteriaMatricola" required placeholder="Es. BAT..." defaultValue={precompilazione?.batteriaMatricola || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 uppercase focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
               <p className="text-xs text-gray-500 mt-1.5">
                 La trovi sull&apos;etichetta della batteria.
               </p>
@@ -546,12 +554,12 @@ export default function RegistrazioneForm({ carrelli }: { carrelli: CarrelloCata
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Data di acquisto *</label>
-              <input name="dataAcquisto" type="date" required max={oggiISO} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <input name="dataAcquisto" type="date" required max={oggiISO} defaultValue={precompilazione?.dataAcquisto || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Numero ordine (opzionale)</label>
-              <input name="numeroOrdine" className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
+              <input name="numeroOrdine" defaultValue={precompilazione?.numeroOrdine || ""} className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 focus:ring-2 focus:ring-[#1A4731] focus:border-transparent outline-none transition" />
             </div>
 
             <div>
