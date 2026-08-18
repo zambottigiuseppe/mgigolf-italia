@@ -112,7 +112,7 @@ export async function generaCertificatoPdf(dati: DatiCertificato): Promise<void>
     fontSemiBoldBytes,
     fontBoldBytes,
     fontItalicBytes,
-    qrPngBytes,
+    qrDataUrl,
   ] = await Promise.all([
     fetchBytes(`${ASSETS}/logo-vertical-golf.png`),
     fetchBytes(`${ASSETS}/logo-mgi.png`),
@@ -122,7 +122,9 @@ export async function generaCertificatoPdf(dati: DatiCertificato): Promise<void>
     fetchBytes(`${ASSETS}/fonts/Montserrat-SemiBold.ttf`),
     fetchBytes(`${ASSETS}/fonts/Montserrat-Bold.ttf`),
     fetchBytes(`${ASSETS}/fonts/Montserrat-MediumItalic.ttf`),
-    QRCode.toBuffer(URL_ATTIVAZIONE_GARANZIA, { type: "png", width: 300, margin: 1 }),
+    // toDataURL, non toBuffer: questa funzione gira nel browser (chiamata da
+    // componenti client), toBuffer della libreria qrcode è Node-only.
+    QRCode.toDataURL(URL_ATTIVAZIONE_GARANZIA, { width: 300, margin: 1 }),
   ]);
 
   const pdfDoc = await PDFDocument.create();
@@ -140,7 +142,7 @@ export async function generaCertificatoPdf(dati: DatiCertificato): Promise<void>
     pdfDoc.embedPng(logoVgBytes),
     pdfDoc.embedPng(logoMgiBytes),
     pdfDoc.embedPng(timbroBytes),
-    pdfDoc.embedPng(qrPngBytes),
+    pdfDoc.embedPng(qrDataUrl),
   ]);
 
   const pageW = mm(210);
