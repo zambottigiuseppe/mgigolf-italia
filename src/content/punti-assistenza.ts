@@ -22,7 +22,7 @@ export const puntiAssistenza: RegioneAssistenza[] = [
       {
         nome: "Vertical Golf",
         citta: "Rovato (BS)",
-        indirizzo: "Via Padania 27, 25038 Rovato (BS)",
+        indirizzo: "Via Padania 25, 25038 Rovato (BS)",
         telefono: "+39 348 3135370",
         email: "direzione@verticalgolf.it",
         sito: "https://verticalgolf.it",

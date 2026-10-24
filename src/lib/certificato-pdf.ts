@@ -348,7 +348,7 @@ export async function generaCertificatoPdf(dati: DatiCertificato): Promise<void>
   disegnaTesto("VERTICAL GOLF", left, footerY, 6.5, bold, VERDE);
   const vgW2 = bold.widthOfTextAtSize("VERTICAL GOLF", 6.5);
   disegnaTesto(
-    " — Vertical Solution S.r.l. · Via Padania 27, 25038 Rovato (BS)",
+    " — Vertical Solution S.r.l. · Via Padania 25, 25038 Rovato (BS)",
     left + vgW2,
     footerY,
     6.5,
