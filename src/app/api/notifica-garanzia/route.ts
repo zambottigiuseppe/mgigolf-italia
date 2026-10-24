@@ -4,7 +4,7 @@ import { getAdminDb } from "@/lib/firebase-admin";
 
 // Mittente: il dominio DEVE essere verificato nel pannello Resend,
 // altrimenti l'invio viene rifiutato.
-const MITTENTE = "MGI Golf Italia <garanzie@verticalgolf.it>";
+const MITTENTE = "MGI Golf Italia <garanzie@mgigolfitalia.it>";
 // Copia interna all'assistenza.
 const DESTINATARIO_INTERNO =
   process.env.EMAIL_ASSISTENZA || "support@verticalgolf.it";
@@ -13,6 +13,17 @@ const DESTINATARIO_INTERNO =
 const FINESTRA_MINUTI = 10;
 // firebase-admin richiede il runtime Node, non Edge.
 export const runtime = "nodejs";
+
+// I dati arrivano da un form pubblico: vanno resi innocui prima di finire
+// nell'HTML dell'email.
+function escapeHtml(valore: unknown): string {
+  return String(valore ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function formattaData(valore: unknown): string {
   try {
@@ -69,12 +80,15 @@ export async function POST(request: Request) {
 
     const resend = new Resend(process.env.RESEND_API_KEY);
 
-    const nomeCompleto = `${d.nome ?? ""} ${d.cognome ?? ""}`.trim();
+    const nomeCompleto = escapeHtml(`${d.nome ?? ""} ${d.cognome ?? ""}`.trim());
+    const campo = (v: unknown) => (v == null || v === "" ? "—" : escapeHtml(v));
+    const matricolaHtml = escapeHtml(matricola);
     const anni = Number(d.anniGaranzia ?? 2);
     const durata = anni === 1 ? "1 anno" : `${anni} anni`;
     const dataAcq = formattaData(d.dataInizioGaranzia ?? d.dataAcquisto);
     const dataScad = formattaData(d.dataScadenzaGaranzia);
-    const emailCliente = String(d.email ?? "");
+    const emailCliente = String(d.email ?? "").trim();
+    const provaUrl = String(d.provaAcquistoUrl ?? "");
 
     // ---------- Email al cliente ----------
     const htmlCliente = `
@@ -90,8 +104,8 @@ export async function POST(request: Request) {
       Di seguito il riepilogo dei dati registrati.
     </p>
     <table style="width:100%;border-collapse:collapse;font-size:14px">
-      <tr><td style="padding:8px 0;color:#6b7280">Modello</td><td style="padding:8px 0;text-align:right;font-weight:600">${d.modello ?? "—"}</td></tr>
-      <tr><td style="padding:8px 0;color:#6b7280;border-top:1px solid #e5e7eb">Numero di serie</td><td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #e5e7eb">${matricola}</td></tr>
+      <tr><td style="padding:8px 0;color:#6b7280">Modello</td><td style="padding:8px 0;text-align:right;font-weight:600">${campo(d.modello)}</td></tr>
+      <tr><td style="padding:8px 0;color:#6b7280;border-top:1px solid #e5e7eb">Numero di serie</td><td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #e5e7eb">${matricolaHtml}</td></tr>
       <tr><td style="padding:8px 0;color:#6b7280;border-top:1px solid #e5e7eb">Data di acquisto</td><td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #e5e7eb">${dataAcq}</td></tr>
       <tr><td style="padding:8px 0;color:#6b7280;border-top:1px solid #e5e7eb">Durata garanzia</td><td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #e5e7eb">${durata}</td></tr>
       <tr><td style="padding:8px 0;color:#6b7280;border-top:1px solid #e5e7eb">Scadenza</td><td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #e5e7eb">${dataScad}</td></tr>
@@ -121,19 +135,19 @@ export async function POST(request: Request) {
   <h2 style="margin:0 0 16px;font-size:16px">Nuova registrazione garanzia dal sito</h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px">
     <tr><td style="padding:6px 0;color:#6b7280">Cliente</td><td style="padding:6px 0"><strong>${nomeCompleto}</strong></td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Email</td><td style="padding:6px 0">${emailCliente}</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Telefono</td><td style="padding:6px 0">${d.telefono ?? "—"}</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Tipo acquirente</td><td style="padding:6px 0">${d.tipoAcquirente ?? "—"}</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Ragione sociale</td><td style="padding:6px 0">${d.ragioneSociale ?? "—"}</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Partita IVA</td><td style="padding:6px 0">${d.partitaIva ?? "—"}</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Modello</td><td style="padding:6px 0">${d.modello ?? "—"}</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Matricola</td><td style="padding:6px 0"><strong>${matricola}</strong></td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Email</td><td style="padding:6px 0">${escapeHtml(emailCliente)}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Telefono</td><td style="padding:6px 0">${campo(d.telefono)}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Tipo acquirente</td><td style="padding:6px 0">${campo(d.tipoAcquirente)}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Ragione sociale</td><td style="padding:6px 0">${campo(d.ragioneSociale)}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Partita IVA</td><td style="padding:6px 0">${campo(d.partitaIva)}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Modello</td><td style="padding:6px 0">${campo(d.modello)}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Matricola</td><td style="padding:6px 0"><strong>${matricolaHtml}</strong></td></tr>
     <tr><td style="padding:6px 0;color:#6b7280">Data acquisto</td><td style="padding:6px 0">${dataAcq}</td></tr>
     <tr><td style="padding:6px 0;color:#6b7280">Scadenza</td><td style="padding:6px 0">${dataScad} (${durata})</td></tr>
-    <tr><td style="padding:6px 0;color:#6b7280">Numero ordine</td><td style="padding:6px 0">${d.numeroOrdine ?? "—"}</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280">Numero ordine</td><td style="padding:6px 0">${campo(d.numeroOrdine)}</td></tr>
     <tr><td style="padding:6px 0;color:#6b7280">Prova d'acquisto</td><td style="padding:6px 0">${
-      d.provaAcquistoUrl
-        ? `<a href="${d.provaAcquistoUrl}">apri documento</a>`
+      provaUrl.startsWith("https://")
+        ? `<a href="${escapeHtml(provaUrl)}">apri documento</a>`
         : "non allegata"
     }</td></tr>
   </table>
@@ -142,23 +156,32 @@ export async function POST(request: Request) {
   </p>
 </div>`;
 
-    await resend.emails.send({
+    // resend.emails.send non lancia eccezioni: l'esito va letto da { error }.
+    const invioCliente = await resend.emails.send({
       from: MITTENTE,
       to: emailCliente,
       replyTo: "support@verticalgolf.it",
       subject: `Garanzia MGI registrata — matricola ${matricola}`,
       html: htmlCliente,
     });
+    if (invioCliente.error) {
+      // Non segniamo emailInviata: l'invio potrà essere ritentato.
+      console.error("Invio email al cliente non riuscito:", matricola, invioCliente.error);
+      return NextResponse.json({ error: "Invio non riuscito" }, { status: 502 });
+    }
 
-    await resend.emails.send({
+    await snap.ref.update({ emailInviata: true });
+
+    const invioInterno = await resend.emails.send({
       from: MITTENTE,
       to: DESTINATARIO_INTERNO,
       replyTo: emailCliente,
       subject: `Nuova garanzia MGI — ${d.modello ?? ""} / ${matricola}`,
       html: htmlInterno,
     });
-
-    await snap.ref.update({ emailInviata: true });
+    if (invioInterno.error) {
+      console.error("Invio copia interna non riuscito:", matricola, invioInterno.error);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -252,6 +252,14 @@ export default function RegistrazioneForm({
         );
       }
 
+      // Email di conferma: non bloccante, la registrazione è già salvata.
+      fetch("/api/notifica-garanzia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matricola }),
+        keepalive: true,
+      }).catch((e) => console.error("Notifica garanzia non inviata:", e));
+
       setAnniAssegnati(anniGaranzia);
       setSuccess(true);
       form.reset();
