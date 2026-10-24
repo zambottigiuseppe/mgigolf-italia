@@ -29,20 +29,5 @@ export const puntiAssistenza: RegioneAssistenza[] = [
         note: "Partner ufficiale MGI per l’Italia – Assistenza e ricambi"
       }
     ]
-  },
-  {
-    id: "piemonte",
-    regione: "Piemonte",
-    punti: [
-      {
-        nome: "HubOut",
-        citta: "Torino",
-        indirizzo: "Corso Regina Margherita 22, 10153 Torino",
-        telefono: "011 9616169",
-        email: "info@hubout.shop",
-        sito: "https://hubout.shop",
-        note: "Punto assistenza autorizzato MGI"
-      }
-    ]
   }
 ];
