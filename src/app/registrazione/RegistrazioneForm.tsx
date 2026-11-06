@@ -260,6 +260,16 @@ export default function RegistrazioneForm({
         keepalive: true,
       }).catch((e) => console.error("Notifica garanzia non inviata:", e));
 
+      // Attivazione della garanzia nel gestionale (carrello venduto a un rivenditore):
+      // non bloccante come l'email, la registrazione è già salvata. Se fallisce si
+      // attiva dal gestionale con "Attiva garanzia" in Registrazioni Garanzia.
+      fetch("/api/attiva-garanzia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matricola }),
+        keepalive: true,
+      }).catch((e) => console.error("Attivazione garanzia non richiesta:", e));
+
       setAnniAssegnati(anniGaranzia);
       setSuccess(true);
       form.reset();
